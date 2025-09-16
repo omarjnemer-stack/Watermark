@@ -889,5 +889,753 @@
     </div>
 
     <!-- Options Section -->
-    <div class="collapsible
+    <div class="collapsible-section">
+        <div class="collapsible-header" onclick="toggleSection(this)">
+            <span>🔧 Options</span>
+            <span class="chevron">▼</span>
+        </div>
+        <div class="collapsible-content">
+            <div class="mobile-options">
+                <div class="mobile-option active" id="allPagesOption">
+                    <div class="option-icon">📄</div>
+                    <div class="option-text">All Pages</div>
+                </div>
+                <div class="mobile-option active" id="highQualityOption">
+                    <div class="option-icon">⭐</div>
+                    <div class="option-text">High Quality</div>
+                </div>
+                <div class="mobile-option" id="behindTextOption">
+                    <div class="option-icon">📋</div>
+                    <div class="option-text">Behind Text</div>
+                </div>
+                <div class="mobile-option" id="smartNamingOption">
+                    <div class="option-icon">🏷️</div>
+                    <div class="option-text">Smart Names</div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Process Button -->
+    <button id="processBtn" class="mobile-btn success full-width" disabled>
+        <span>⚡</span>
+        <span>Create Watermarked PDFs</span>
+    </button>
+
+    <!-- Status Panel -->
+    <div id="statusPanel" class="mobile-status" style="display: none;">
+        <div id="statusContent"></div>
+        <div id="progressContainer" class="mobile-progress" style="display: none;">
+            <div id="progressBar" class="progress-fill" style="width: 0%;"></div>
+        </div>
+        <div id="downloadSection" class="mobile-downloads"></div>
+    </div>
+</div>
+
+<script>
+    class MobilePDFWatermarkStudio {
+        constructor() {
+            this.pdfFiles = [];
+            this.imageFile = null;
+            this.currentPosition = 'center';
+            this.watermarkType = 'image';
+            this.processedFiles = [];
+            this.stats = { fileCount: 0, totalSize: 0 };
+
+            this.initializeElements();
+            this.bindEvents();
+            this.setupDragAndDrop();
+            this.initializeSliders();
+        }
+
+        initializeElements() {
+            // File inputs
+            this.pdfInput = document.getElementById('pdfFile');
+            this.imageInput = document.getElementById('imageFile');
+            
+            // Zones
+            this.pdfZone = document.getElementById('pdfZone');
+            this.imageZone = document.getElementById('imageZone');
+            
+            // Controls
+            this.transparencySlider = document.getElementById('transparency');
+            this.scaleSlider = document.getElementById('scale');
+            this.rotationSlider = document.getElementById('rotation');
+            this.fontSizeSlider = document.getElementById('fontSize');
+            
+            // Buttons and panels
+            this.processBtn = document.getElementById('processBtn');
+            this.statusPanel = document.getElementById('statusPanel');
+            this.statusContent = document.getElementById('statusContent');
+            this.progressContainer = document.getElementById('progressContainer');
+            this.progressBar = document.getElementById('progressBar');
+            
+            // Mobile-specific elements
+            this.tabButtons = document.querySelectorAll('.mobile-tab');
+            this.positionButtons = document.querySelectorAll('.position-btn');
+            this.optionCards = document.querySelectorAll('.mobile-option');
+            
+            // Stats
+            this.fileCountEl = document.getElementById('fileCount');
+            this.totalSizeEl = document.getElementById('totalSize');
+        }
+
+        bindEvents() {
+            // File inputs
+            this.pdfInput.addEventListener('change', (e) => this.handlePDFFiles(Array.from(e.target.files)));
+            this.imageInput.addEventListener('change', (e) => this.handleImageFile(e.target.files[0]));
+            
+            // Tabs
+            this.tabButtons.forEach(btn => {
+                btn.addEventListener('click', () => this.switchWatermarkType(btn.dataset.type));
+            });
+            
+            // Position buttons
+            this.positionButtons.forEach(btn => {
+                btn.addEventListener('click', () => this.selectPosition(btn));
+            });
+            
+            // Option cards
+            this.optionCards.forEach(card => {
+                card.addEventListener('click', () => this.toggleOption(card));
+            });
+            
+            // Sliders
+            this.transparencySlider.addEventListener('input', () => this.updateSliderValue('transparency'));
+            this.scaleSlider.addEventListener('input', () => this.updateSliderValue('scale'));
+            this.rotationSlider.addEventListener('input', () => this.updateSliderValue('rotation'));
+            this.fontSizeSlider.addEventListener('input', () => this.updateSliderValue('fontSize'));
+            
+            // Text input
+            document.getElementById('watermarkText').addEventListener('input', () => {
+                this.checkReadyToProcess();
+            });
+            
+            // Process button
+            this.processBtn.addEventListener('click', () => this.processAllDocuments());
+
+            // Add touch event handling for better mobile experience
+            this.addTouchEventHandling();
+        }
+
+        addTouchEventHandling() {
+            // Prevent zoom on double tap for buttons
+            document.addEventListener('touchend', (e) => {
+                if (e.target.closest('.mobile-btn, .position-btn, .mobile-option, .mobile-tab')) {
+                    e.preventDefault();
+                }
+            }, { passive: false });
+
+            // Add haptic feedback for supported devices
+            const addHapticFeedback = (element) => {
+                element.addEventListener('touchstart', () => {
+                    if (navigator.vibrate) {
+                        navigator.vibrate(10); // Short vibration
+                    }
+                });
+            };
+
+            document.querySelectorAll('.mobile-btn, .position-btn, .mobile-option, .mobile-tab').forEach(addHapticFeedback);
+        }
+
+        setupDragAndDrop() {
+            this.setupZoneDragAndDrop(this.pdfZone, (files) => {
+                const pdfFiles = files.filter(f => f.type === 'application/pdf');
+                if (pdfFiles.length > 0) this.handlePDFFiles(pdfFiles);
+            });
+
+            this.setupZoneDragAndDrop(this.imageZone, (files) => {
+                const imageFile = files.find(f => f.type.startsWith('image/'));
+                if (imageFile) this.handleImageFile(imageFile);
+            });
+        }
+
+        setupZoneDragAndDrop(zone, handler) {
+            ['dragenter', 'dragover', 'dragleave', 'drop'].forEach(eventName => {
+                zone.addEventListener(eventName, this.preventDefaults);
+            });
+
+            ['dragenter', 'dragover'].forEach(eventName => {
+                zone.addEventListener(eventName, () => zone.classList.add('dragover'));
+            });
+
+            ['dragleave', 'drop'].forEach(eventName => {
+                zone.addEventListener(eventName, () => zone.classList.remove('dragover'));
+            });
+
+            zone.addEventListener('drop', (e) => {
+                const files = Array.from(e.dataTransfer.files);
+                handler(files);
+            });
+        }
+
+        preventDefaults(e) {
+            e.preventDefault();
+            e.stopPropagation();
+        }
+
+        handlePDFFiles(files) {
+            const validPDFs = files.filter(f => f.type === 'application/pdf');
+            if (validPDFs.length === 0) return;
+
+            // Add new files
+            validPDFs.forEach(newFile => {
+                const existingIndex = this.pdfFiles.findIndex(f => f.name === newFile.name);
+                if (existingIndex >= 0) {
+                    this.pdfFiles[existingIndex] = newFile;
+                } else {
+                    this.pdfFiles.push(newFile);
+                }
+            });
+
+            this.updatePDFFileGrid();
+            this.updateStats();
+            this.checkReadyToProcess();
+            this.showToast(`Added ${validPDFs.length} PDF${validPDFs.length > 1 ? 's' : ''}`);
+        }
+
+        updatePDFFileGrid() {
+            const grid = document.getElementById('pdfFileGrid');
+            grid.innerHTML = '';
+
+            this.pdfFiles.forEach((file, index) => {
+                const fileCard = document.createElement('div');
+                fileCard.className = 'mobile-file-card';
+                fileCard.innerHTML = `
+                    <div class="file-info">
+                        <div class="file-name">${file.name}</div>
+                        <div class="file-size">${this.formatFileSize(file.size)}</div>
+                    </div>
+                    <button class="remove-btn" onclick="mobileWatermarkStudio.removeFile(${index})">×</button>
+                `;
+                grid.appendChild(fileCard);
+            });
+        }
+
+        removeFile(index) {
+            const fileName = this.pdfFiles[index].name;
+            this.pdfFiles.splice(index, 1);
+            this.updatePDFFileGrid();
+            this.updateStats();
+            this.checkReadyToProcess();
+            this.showToast(`Removed ${fileName}`);
+        }
+
+        handleImageFile(file) {
+            if (!file || !file.type.startsWith('image/')) return;
+
+            this.imageFile = file;
+            
+            const reader = new FileReader();
+            reader.onload = (e) => {
+                document.getElementById('previewImg').src = e.target.result;
+                document.getElementById('imagePreview').classList.add('show');
+            };
+            reader.readAsDataURL(file);
+            
+            this.checkReadyToProcess();
+            this.showToast(`Image loaded: ${file.name}`);
+        }
+
+        switchWatermarkType(type) {
+            this.watermarkType = type;
+            
+            // Update tabs
+            this.tabButtons.forEach(btn => {
+                btn.classList.toggle('active', btn.dataset.type === type);
+            });
+            
+            // Show/hide panels
+            document.getElementById('imagePanel').classList.toggle('hidden', type !== 'image');
+            document.getElementById('textPanel').classList.toggle('hidden', type !== 'text');
+            document.getElementById('fontSizeControl').style.display = type === 'text' ? 'block' : 'none';
+            
+            this.checkReadyToProcess();
+        }
+
+        selectPosition(btn) {
+            this.positionButtons.forEach(b => b.classList.remove('active'));
+            btn.classList.add('active');
+            this.currentPosition = btn.dataset.position;
+            
+            // Haptic feedback
+            if (navigator.vibrate) {
+                navigator.vibrate(20);
+            }
+        }
+
+        toggleOption(card) {
+            card.classList.toggle('active');
+            
+            // Haptic feedback
+            if (navigator.vibrate) {
+                navigator.vibrate(15);
+            }
+        }
+
+        updateSliderValue(type) {
+            const slider = document.getElementById(type);
+            const valueEl = document.getElementById(type + 'Value');
+            const value = parseFloat(slider.value);
+            
+            switch (type) {
+                case 'transparency':
+                    valueEl.textContent = Math.round(value * 100) + '%';
+                    break;
+                case 'scale':
+                    valueEl.textContent = Math.round(value * 100) + '%';
+                    break;
+                case 'rotation':
+                    valueEl.textContent = value + '°';
+                    break;
+                case 'fontSize':
+                    valueEl.textContent = value + 'px';
+                    break;
+            }
+            
+            this.updateSliderBackground(slider);
+        }
+
+        updateSliderBackground(slider) {
+            const min = parseFloat(slider.min);
+            const max = parseFloat(slider.max);
+            const value = parseFloat(slider.value);
+            const percentage = ((value - min) / (max - min)) * 100;
+            
+            slider.style.background = `linear-gradient(to right, 
+                var(--primary) 0%, 
+                var(--primary) ${percentage}%, 
+                rgba(255, 255, 255, 0.3) ${percentage}%, 
+                rgba(255, 255, 255, 0.3) 100%)`;
+        }
+
+        initializeSliders() {
+            ['transparency', 'scale', 'rotation', 'fontSize'].forEach(type => {
+                this.updateSliderValue(type);
+            });
+        }
+
+        updateStats() {
+            this.stats.fileCount = this.pdfFiles.length;
+            this.stats.totalSize = this.pdfFiles.reduce((sum, file) => sum + file.size, 0);
+            
+            this.fileCountEl.textContent = this.stats.fileCount;
+            this.totalSizeEl.textContent = this.formatFileSize(this.stats.totalSize);
+        }
+
+        formatFileSize(bytes) {
+            if (bytes === 0) return '0MB';
+            const k = 1024;
+            const sizes = ['B', 'KB', 'MB', 'GB'];
+            const i = Math.floor(Math.log(bytes) / Math.log(k));
+            return parseFloat((bytes / Math.pow(k, i)).toFixed(1)) + sizes[i];
+        }
+
+        checkReadyToProcess() {
+            const hasFiles = this.pdfFiles.length > 0;
+            const hasWatermark = this.watermarkType === 'image' ? 
+                this.imageFile !== null : 
+                document.getElementById('watermarkText').value.trim() !== '';
+            
+            this.processBtn.disabled = !(hasFiles && hasWatermark);
+        }
+
+        showStatus(message, type) {
+            this.statusContent.innerHTML = message;
+            this.statusPanel.className = `mobile-status ${type}`;
+            this.statusPanel.style.display = 'block';
+            
+            // Scroll to status
+            setTimeout(() => {
+                this.statusPanel.scrollIntoView({ behavior: 'smooth', block: 'center' });
+            }, 100);
+        }
+
+        updateProgress(current, total) {
+            const percentage = Math.round((current / total) * 100);
+            this.progressBar.style.width = percentage + '%';
+            return percentage;
+        }
+
+        showToast(message) {
+            // Create toast notification
+            const toast = document.createElement('div');
+            toast.className = 'toast';
+            toast.style.cssText = `
+                position: fixed;
+                top: 20px;
+                left: 50%;
+                transform: translateX(-50%);
+                background: var(--bg-primary);
+                color: var(--text-primary);
+                padding: 12px 20px;
+                border-radius: var(--radius-sm);
+                box-shadow: var(--shadow);
+                border: 1px solid var(--border);
+                z-index: 10000;
+                font-size: 0.9em;
+                font-weight: 500;
+                opacity: 0;
+                transition: all 0.3s ease;
+                max-width: calc(100% - 40px);
+                text-align: center;
+            `;
+            toast.textContent = message;
+            
+            document.body.appendChild(toast);
+            
+            // Animate in
+            setTimeout(() => {
+                toast.style.opacity = '1';
+                toast.style.transform = 'translateX(-50%) translateY(0)';
+            }, 10);
+            
+            // Remove after 3 seconds
+            setTimeout(() => {
+                toast.style.opacity = '0';
+                toast.style.transform = 'translateX(-50%) translateY(-20px)';
+                setTimeout(() => {
+                    if (toast.parentNode) {
+                        toast.parentNode.removeChild(toast);
+                    }
+                }, 300);
+            }, 3000);
+        }
+
+        async processAllDocuments() {
+            if (this.pdfFiles.length === 0) return;
+
+            this.showStatus('<div class="loading-spinner"></div>Processing your files...', 'processing');
+            this.processBtn.disabled = true;
+            this.progressContainer.style.display = 'block';
+            this.processedFiles = [];
+
+            try {
+                const settings = this.getProcessingSettings();
+                let successCount = 0;
+
+                for (let i = 0; i < this.pdfFiles.length; i++) {
+                    const file = this.pdfFiles[i];
+                    const progress = this.updateProgress(i, this.pdfFiles.length);
+                    
+                    this.showStatus(
+                        `<div class="loading-spinner"></div>Processing "${file.name}" (${i + 1}/${this.pdfFiles.length})`, 
+                        'processing'
+                    );
+
+                    try {
+                        const result = await this.processSinglePDF(file, settings);
+                        this.processedFiles.push(result);
+                        if (!result.error) successCount++;
+                    } catch (error) {
+                        this.processedFiles.push({
+                            name: file.name,
+                            error: error.message
+                        });
+                    }
+                }
+
+                this.updateProgress(this.pdfFiles.length, this.pdfFiles.length);
+                await this.showProcessingResults(successCount);
+
+            } catch (error) {
+                this.showStatus(`❌ Processing failed: ${error.message}`, 'error');
+            } finally {
+                this.processBtn.disabled = false;
+                this.checkReadyToProcess();
+            }
+        }
+
+        getProcessingSettings() {
+            return {
+                transparency: parseFloat(this.transparencySlider.value),
+                scale: parseFloat(this.scaleSlider.value),
+                rotation: parseFloat(this.rotationSlider.value),
+                position: this.currentPosition,
+                watermarkType: this.watermarkType,
+                allPages: document.getElementById('allPagesOption').classList.contains('active'),
+                highQuality: document.getElementById('highQualityOption').classList.contains('active'),
+                behindText: document.getElementById('behindTextOption').classList.contains('active'),
+                smartNaming: document.getElementById('smartNamingOption').classList.contains('active'),
+                // Text settings
+                text: document.getElementById('watermarkText').value,
+                fontFamily: document.getElementById('fontFamily').value,
+                fontSize: parseFloat(this.fontSizeSlider.value),
+                textColor: document.getElementById('textColor').value
+            };
+        }
+
+        async processSinglePDF(file, settings) {
+            try {
+                const pdfArrayBuffer = await file.arrayBuffer();
+                const pdfDoc = await PDFLib.PDFDocument.load(pdfArrayBuffer);
+                const pages = pdfDoc.getPages();
+                
+                let watermarkElement;
+                
+                if (settings.watermarkType === 'image') {
+                    const imageArrayBuffer = await this.imageFile.arrayBuffer();
+                    if (this.imageFile.type === 'image/png') {
+                        watermarkElement = await pdfDoc.embedPng(imageArrayBuffer);
+                    } else {
+                        watermarkElement = await pdfDoc.embedJpg(imageArrayBuffer);
+                    }
+                } else {
+                    watermarkElement = {
+                        type: 'text',
+                        text: settings.text,
+                        font: await pdfDoc.embedFont(PDFLib.StandardFonts[settings.fontFamily] || PDFLib.StandardFonts.Helvetica),
+                        size: settings.fontSize,
+                        color: this.hexToRgb(settings.textColor)
+                    };
+                }
+                
+                const pagesToProcess = settings.allPages ? pages : [pages[0]];
+                
+                pagesToProcess.forEach(page => {
+                    this.applyWatermarkToPage(page, watermarkElement, settings);
+                });
+                
+                const pdfBytes = await pdfDoc.save({
+                    useObjectStreams: settings.highQuality
+                });
+                
+                const fileName = settings.smartNaming ? 
+                    this.generateSmartFileName(file.name, settings) :
+                    file.name.replace('.pdf', '_watermarked.pdf');
+                
+                const blob = new Blob([pdfBytes], { type: 'application/pdf' });
+                const url = URL.createObjectURL(blob);
+                
+                return {
+                    name: fileName,
+                    originalName: file.name,
+                    url: url,
+                    size: pdfBytes.length,
+                    pages: pagesToProcess.length
+                };
+                
+            } catch (error) {
+                throw new Error(`Failed to process ${file.name}: ${error.message}`);
+            }
+        }
+
+        applyWatermarkToPage(page, watermarkElement, settings) {
+            const { width: pageWidth, height: pageHeight } = page.getSize();
+            
+            if (settings.watermarkType === 'image') {
+                const imgDims = watermarkElement.scale(settings.scale);
+                const { x, y } = this.getPositionCoordinates(
+                    pageWidth, pageHeight, 
+                    imgDims.width, imgDims.height, 
+                    settings.position
+                );
+                
+                page.drawImage(watermarkElement, {
+                    x, y,
+                    width: imgDims.width,
+                    height: imgDims.height,
+                    opacity: settings.transparency,
+                    rotate: PDFLib.degrees(settings.rotation),
+                });
+            } else {
+                const textWidth = watermarkElement.font.widthOfTextAtSize(
+                    watermarkElement.text, 
+                    watermarkElement.size
+                );
+                const textHeight = watermarkElement.size;
+                
+                const { x, y } = this.getPositionCoordinates(
+                    pageWidth, pageHeight, 
+                    textWidth, textHeight, 
+                    settings.position
+                );
+                
+                page.drawText(watermarkElement.text, {
+                    x, y,
+                    size: watermarkElement.size,
+                    font: watermarkElement.font,
+                    color: PDFLib.rgb(
+                        watermarkElement.color.r / 255,
+                        watermarkElement.color.g / 255,
+                        watermarkElement.color.b / 255
+                    ),
+                    opacity: settings.transparency,
+                    rotate: PDFLib.degrees(settings.rotation),
+                });
+            }
+        }
+
+        getPositionCoordinates(pageWidth, pageHeight, imgWidth, imgHeight, position) {
+            const margin = 30;
+            const positions = {
+                'top-left': { x: margin, y: pageHeight - imgHeight - margin },
+                'top-center': { x: (pageWidth - imgWidth) / 2, y: pageHeight - imgHeight - margin },
+                'top-right': { x: pageWidth - imgWidth - margin, y: pageHeight - imgHeight - margin },
+                'center-left': { x: margin, y: (pageHeight - imgHeight) / 2 },
+                'center': { x: (pageWidth - imgWidth) / 2, y: (pageHeight - imgHeight) / 2 },
+                'center-right': { x: pageWidth - imgWidth - margin, y: (pageHeight - imgHeight) / 2 },
+                'bottom-left': { x: margin, y: margin },
+                'bottom-center': { x: (pageWidth - imgWidth) / 2, y: margin },
+                'bottom-right': { x: pageWidth - imgWidth - margin, y: margin }
+            };
+            return positions[position] || positions['center'];
+        }
+
+        hexToRgb(hex) {
+            const result = /^#?([a-f\d]{2})([a-f\d]{2})([a-f\d]{2})$/i.exec(hex);
+            return result ? {
+                r: parseInt(result[1], 16),
+                g: parseInt(result[2], 16),
+                b: parseInt(result[3], 16)
+            } : { r: 255, g: 0, b: 0 };
+        }
+
+        generateSmartFileName(originalName, settings) {
+            const baseName = originalName.replace('.pdf', '');
+            const timestamp = new Date().toISOString().slice(5, 16).replace(/[:-]/g, '');
+            const watermarkType = settings.watermarkType === 'image' ? 'img' : 'txt';
+            
+            return `${baseName}_${watermarkType}_${timestamp}.pdf`;
+        }
+
+        async showProcessingResults(successCount) {
+            const totalCount = this.pdfFiles.length;
+            
+            let resultHTML = `
+                <div style="margin-bottom: 15px;">
+                    <strong>✅ ${successCount} file${successCount !== 1 ? 's' : ''} processed successfully!</strong>
+                </div>
+            `;
+
+            this.showStatus(resultHTML, 'success');
+            
+            if (successCount > 0) {
+                await this.renderMobileDownloads();
+            }
+        }
+
+        async renderMobileDownloads() {
+            const downloadSection = document.getElementById('downloadSection');
+            downloadSection.innerHTML = '';
+
+            const successFiles = this.processedFiles.filter(f => !f.error);
+            
+            successFiles.forEach(file => {
+                const card = document.createElement('div');
+                card.className = 'mobile-download-card';
+                card.innerHTML = `
+                    <div class="download-header">
+                        <div class="download-name">${file.name}</div>
+                        <div class="download-size">${this.formatFileSize(file.size)}</div>
+                    </div>
+                    <a href="${file.url}" download="${file.name}" class="mobile-btn download-btn">
+                        <span>💾</span>
+                        <span>Download</span>
+                    </a>
+                `;
+                downloadSection.appendChild(card);
+            });
+
+            if (successFiles.length > 1) {
+                const batchCard = document.createElement('div');
+                batchCard.className = 'mobile-download-card';
+                batchCard.innerHTML = `
+                    <div class="download-header">
+                        <div class="download-name">📦 All Files as ZIP</div>
+                        <div class="download-size">${successFiles.length} files</div>
+                    </div>
+                    <button onclick="mobileWatermarkStudio.downloadAsZip()" class="mobile-btn batch-download download-btn">
+                        <span>📦</span>
+                        <span>Download ZIP</span>
+                    </button>
+                `;
+                downloadSection.appendChild(batchCard);
+            }
+        }
+
+        async downloadAsZip() {
+            try {
+                this.showStatus('<div class="loading-spinner"></div>Creating ZIP file...', 'processing');
+                
+                const zip = new JSZip();
+                const successFiles = this.processedFiles.filter(f => !f.error);
+                
+                for (const file of successFiles) {
+                    const response = await fetch(file.url);
+                    const blob = await response.blob();
+                    zip.file(file.name, blob);
+                }
+                
+                const zipBlob = await zip.generateAsync({ type: 'blob' });
+                const url = URL.createObjectURL(zipBlob);
+                const timestamp = new Date().toISOString().slice(5, 16).replace(/[:-]/g, '');
+                
+                const link = document.createElement('a');
+                link.href = url;
+                link.download = `watermarked_pdfs_${timestamp}.zip`;
+                link.click();
+                
+                URL.revokeObjectURL(url);
+                
+                this.showToast('ZIP download started!');
+                setTimeout(() => this.showProcessingResults(successFiles.length), 1500);
+                
+            } catch (error) {
+                this.showStatus(`❌ Failed to create ZIP: ${error.message}`, 'error');
+            }
+        }
+    }
+
+    // Global functions
+    function toggleSection(header) {
+        const content = header.nextElementSibling;
+        const chevron = header.querySelector('.chevron');
+        
+        content.classList.toggle('expanded');
+        chevron.classList.toggle('rotated');
+        
+        // Haptic feedback
+        if (navigator.vibrate) {
+            navigator.vibrate(10);
+        }
+    }
+
+    // Initialize the mobile app
+    let mobileWatermarkStudio;
+    
+    document.addEventListener('DOMContentLoaded', function() {
+        mobileWatermarkStudio = new MobilePDFWatermarkStudio();
+        
+        // Handle orientation changes
+        window.addEventListener('orientationchange', () => {
+            setTimeout(() => {
+                // Refresh layout after orientation change
+                window.dispatchEvent(new Event('resize'));
+            }, 100);
+        });
+        
+        // Prevent pull-to-refresh on mobile
+        document.body.addEventListener('touchstart', e => {
+            if (e.touches.length !== 1) { return; }
+            const scrollY = window.pageYOffset || document.body.scrollTop || document.documentElement.scrollTop;
+            if (scrollY > 0) { return; }
+            e.preventDefault();
+        }, { passive: false });
+        
+        document.body.addEventListener('touchmove', e => {
+            if (e.touches.length !== 1) { return; }
+            const scrollY = window.pageYOffset || document.body.scrollTop || document.documentElement.scrollTop;
+            if (scrollY > 0) { return; }
+            e.preventDefault();
+        }, { passive: false });
+    });
+
+    // Global helper functions
+    window.removeFile = (index) => mobileWatermarkStudio.removeFile(index);
+    window.downloadAsZip = () => mobileWatermarkStudio.downloadAsZip();
+</script>
 ```
+
+</body>
+</html>
